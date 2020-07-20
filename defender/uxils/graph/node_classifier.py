@@ -28,7 +28,7 @@ class ConvolutionalNodeClassifier:
     """
 
     def __init__(self, *, n_classes, conv_class, hidden_size, n_layers, in_dropout=None, out_dropout=None,
-                 normalization=None,
+                 in_normalization=None, hidden_normalization=None,
                  n_epochs=10, wd=0, lr=0.01, optimizer='adam', activation='tanh', device='cuda'):
         self.conv_class = conv_class
         self.hidden_size = hidden_size
@@ -42,7 +42,8 @@ class ConvolutionalNodeClassifier:
         self.wd = wd
         self.optimizer_str = optimizer
         self.activation = activation
-        self.normalization = normalization
+        self.in_normalization = in_normalization
+        self.hidden_normalization = hidden_normalization
         self.model = None
 
     def init_model(self, data):
@@ -51,7 +52,7 @@ class ConvolutionalNodeClassifier:
             input_size=input_size, n_classes=self.n_classes,
             n_layers=self.n_layers, conv_class=self.conv_class, n_hidden=self.hidden_size,
             in_dropout=self.in_dropout, out_dropout=self.out_dropout, activation=self.activation,
-            normalization=self.normalization)
+            in_normalization=self.in_normalization, hidden_normalization=self.hidden_normalization)
         self.model = self.model.to(self.device)
         self.optimizer = init_optimizer(self.optimizer_str)(self.model.parameters(), lr=self.lr, weight_decay=self.wd)
         self.criterion = torch.nn.CrossEntropyLoss()

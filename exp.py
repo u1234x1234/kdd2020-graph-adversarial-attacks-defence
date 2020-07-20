@@ -1,6 +1,7 @@
 # %%
 import pickle
 from functools import partial
+import joblib
 
 import numpy as np
 from dgl.nn import pytorch as dgl_layers
@@ -46,41 +47,169 @@ X = X[:len(labels)]
 print(X.shape, len(y))
 
 
-X = StandardScaler().fit_transform(X)
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=True, random_state=1)
-cv = [get_validation_split(len(labels))]
+# features = StandardScaler().fit_transform(features)
+
+cv = [get_validation_split(len(labels), test_size=0.1)]
 
 # %%
-# import pickle
-# with Timer('fit'):
-    # model = ensemble.RandomForestClassifier(n_jobs=40, n_estimators=100)
-    # model = LogisticRegression(solver='sag', n_jobs=20, max_iter=5)
-    # model.fit(X_train, y_train)
-# with Timer('predict'):
-    # y_pred = model.predict(X_test)
-    # print((y_pred == y_test).mean())
 
-
-labels = np.pad(labels, (0, len(features) - len(labels)), constant_values=-1)
 # optimize_graph_node_classifier('accuracy', features, labels, adj, cv)
+from scipy import sparse
+from uxils.random_ext import fix_seed
+fix_seed()
 
-n_classes = np.max(labels) + 1
-conv_class = partial(dgl_layers.TAGConv, k=2)
-model = ConvolutionalNodeClassifier(
-    n_classes=n_classes, conv_class=conv_class, hidden_size=32, n_layers=1, lr=0.01, normalization=None, wd=0.01,
-    optimizer='adamw', activation='tanh',
-)
 
-train_idx, val_idx = cv[0]
-g = create_graph(features, labels, adj)
-import joblib
+def func(features, labels, adj):
+    n_classes = np.max(labels) + 1
+    conv_class = partial(dgl_layers.TAGConv, k=3)
+    model = ConvolutionalNodeClassifier(
+        n_classes=n_classes, conv_class=conv_class, hidden_size=40, n_layers=3, lr=0.01,
+        in_normalization='bn', hidden_normalization=None, wd=0.01,
+        optimizer='adamw', activation='tanh'
+    )
+    train_idx, val_idx = cv[0]
+    g = create_graph(features, labels, adj)
 
-for i in range(10):
-    model.fit(g, train_idx, n_epochs=20)
+    for i in range(10):
+        model.fit(g, train_idx, n_epochs=20)
+
+        r = model.predict(g, val_idx)
+        acc = (r.argmax(axis=1) == labels[val_idx]).mean()
+        print(acc)
 
     joblib.dump(model, 'model.pkl')
-    model = joblib.load('model.pkl')
 
-    r = model.predict(g, val_idx)
-    acc = (r.argmax(axis=1) == labels[val_idx]).mean()
-    print(acc)
+    return acc
+
+
+def create_adj(adj, test_idxs):
+    adj = adj.copy()
+
+    add_adj = sparse.dok_matrix((500, 659574+500), dtype=np.int64)
+
+    ####################################
+
+    idxs = []
+    for i in test_idxs:
+        r = adj[i].getnnz()
+        idxs.append((i, r))
+
+    idxs = list(sorted(idxs, key=lambda x: x[1]))[:10000]
+
+    for i, (idx, r) in enumerate(idxs):
+        for j in range(5):
+            row = (i+j) % 500
+            add_adj[row, idx] = 1
+
+    add_adj = add_adj.tocsr()
+    print(add_adj.getnnz(axis=1))
+
+    ####################################
+
+    assert add_adj.getnnz(axis=1).max() <= 100
+    assert (add_adj[:, 659574:].transpose(copy=True).todense() == add_adj[:, 659574:].todense()).all()
+
+    nadj = adj.copy().todok()
+    nadj.resize((659574+500, 659574+500))
+    cx = add_adj.tocoo()
+
+    for i, j, v in zip(cx.row, cx.col, cx.data):
+        nadj[659574+i, j] = v
+        nadj[j, i+659574] = v
+
+    nadj = nadj.tocsr()
+    nadj = nadj.astype(np.int64)
+    return nadj, add_adj
+
+
+nlabels = np.pad(labels, (0, adj.shape[0] - len(labels)), constant_values=-1)
+score = func(features, nlabels, adj)
+print(score)
+qwe
+
+val_idx = cv[0][1]
+# test_idx = list(range(len(labels), adj.shape[0]))
+# print('test', test_idx[:3], len(test_idx))
+
+nadj, add_adj = create_adj(adj, val_idx)
+print(add_adj.shape, add_adj.dtype)
+
+# with open('adj.pkl', 'wb') as out_file:
+    # pickle.dump(add_adj, out_file)
+
+print('NNZ diff', nadj.getnnz() - adj.getnnz())
+nlabels = np.pad(labels, (0, nadj.shape[0] - len(labels)), constant_values=-1)
+# nfeatures = np.random.uniform(-2, 2, size=(500, 100)).astype(np.float32)
+nfeatures = np.random.choice([-1.9], size=(500, 100)).astype(np.float32)
+# np.save('feature.npy', nfeatures)
+
+# score = func(np.vstack((features, nfeatures)), nlabels, nadj)
+
+
+qwe
+
+
+# %%
+# print(nfeatures.shape, len(nlabels), nadj.shape)
+import sys
+sys.path.append('/home/u1234x1234/libs/pygmo2/build/')
+
+import pygmo as pg
+
+
+def obj(w):
+    w = w.reshape((500, 100))
+    nfeatures = np.vstack((features, w))
+    score = func(nfeatures, nlabels, nadj)
+    return -score
+
+
+class problem:
+    def __init__(self):
+        self.dim = 100*500
+
+    def fitness(self, x):
+        score = obj(x)
+        print(score)
+        return [score]
+
+    def get_bounds(self):
+        return ([-2]*self.dim, [2] * self.dim)
+
+
+prob = pg.problem(problem())
+print(prob)
+
+algo = pg.algorithm(pg.sga(gen=10))
+algo.set_verbosity(5)
+print(algo)
+
+pop = pg.population(prob, 20)
+pop = algo.evolve(pop)
+print(pop.champion_f) 
+qwe
+
+
+w = np.random.normal(0, 1, size=(500, 100)).flatten()
+alpha = 0.5
+import noisyopt
+
+noisyopt.minimizeSPSA(obj, w, paired=False)
+
+qwe
+
+for it in range(100):
+
+    delta = np.random.uniform(-0.2, 0.2, size=w.shape)
+    w[w > 2] = 2
+    w[w < -2] = -2
+
+    score1 = func(np.vstack((features, w+delta)), nlabels, nadj)
+    score2 = func(np.vstack((features, w-delta)), nlabels, nadj)
+
+    grad = (score1 - score2) / (2. * delta)
+    w = w - alpha * grad
+
+    print(score1, score2)
+
+# Train on FUll
