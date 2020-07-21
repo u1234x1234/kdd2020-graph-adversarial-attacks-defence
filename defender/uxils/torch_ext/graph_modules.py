@@ -42,30 +42,35 @@ class GraphConvolutionStack(nn.Module):
     """
     def __init__(
             self, input_size, n_classes, conv_class,
-            in_dropout, out_dropout, n_hidden, n_layers, activation, in_normalization, hidden_normalization):
+            in_dropout, out_dropout, n_hiddens, activation, in_normalization, hidden_normalization):
         super().__init__()
 
         self.layers = nn.ModuleList()
-        self.in_nn = nn.Linear(input_size, n_hidden)
+        self.in_nn = nn.Linear(input_size, n_hiddens[0])
+        n_prev = n_hiddens[0]
+        self.hidden_normalization = nn.ModuleList() if hidden_normalization else None
 
-        for _ in range(n_layers):
+        for n_hidden in n_hiddens[1:]:
             if 'GINConv' in _get_name(conv_class):
                 self.layers.append(conv_class(
-                    apply_func=nn.Linear(n_hidden, n_hidden),
+                    apply_func=nn.Linear(n_prev, n_hidden),
                     aggregator_type='mean'))
             elif 'AGNNConv' in _get_name(conv_class):
                 self.layers.append(conv_class())
             elif 'APPNPConv' in _get_name(conv_class):
-                self.layers.append(nn.Linear(n_hidden, n_hidden))
+                self.layers.append(nn.Linear(n_prev, n_hidden))
             else:
-                self.layers.append(conv_class(n_hidden, n_hidden))
+                self.layers.append(conv_class(n_prev, n_hidden))
 
-        self.out_nn = nn.Linear(n_hidden, n_classes)
+            n_prev = n_hidden
+            if hidden_normalization is not None:
+                self.hidden_normalization.append(init_normalization(hidden_normalization)(n_hidden))
+
+        self.out_nn = nn.Linear(n_hiddens[-1], n_classes)
         self.in_dropout = nn.Dropout(in_dropout) if in_dropout is not None else None
         self.out_dropout = nn.Dropout(out_dropout) if out_dropout is not None else None
         self.activation = init_activation(activation)
         self.in_normalization = init_normalization(in_normalization)(input_size) if in_normalization else None
-        self.hidden_normalization = init_normalization(hidden_normalization)(n_hidden) if hidden_normalization else None
 
     def forward(self, g: DGLGraph, data):
         x = data.x
@@ -78,7 +83,7 @@ class GraphConvolutionStack(nn.Module):
         if self.in_dropout is not None:
             x = self.in_dropout(x)
 
-        for layer in self.layers:
+        for idx, layer in enumerate(self.layers):
             if _is_dgl(layer):
                 x = layer(g, x)
             else:
@@ -88,7 +93,7 @@ class GraphConvolutionStack(nn.Module):
                     x = layer(x, edge_index=data.edge_index)
 
             if self.hidden_normalization is not None:
-                x = self.hidden_normalization(x)
+                x = self.hidden_normalization[idx](x)
 
             x = self.activation(x).squeeze()  # GAT num heads (b, H, d)
 

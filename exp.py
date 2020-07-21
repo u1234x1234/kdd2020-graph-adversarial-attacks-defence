@@ -1,9 +1,15 @@
 # %%
+import numpy as np
+
+nfeatures = np.random.choice([-1.99], size=(500, 100)).astype(np.float32)
+np.save('feature.npy', nfeatures)
+
+qwe
+
 import pickle
 from functools import partial
 import joblib
 
-import numpy as np
 from dgl.nn import pytorch as dgl_layers
 from scipy.special import softmax
 from sklearn.linear_model import LogisticRegression
@@ -49,11 +55,13 @@ print(X.shape, len(y))
 
 # features = StandardScaler().fit_transform(features)
 
-cv = [get_validation_split(len(labels), test_size=0.1)]
+cv = [get_validation_split(len(labels), test_size=0.01)]
 
 # %%
+# nlabels = np.pad(labels, (0, adj.shape[0] - len(labels)), constant_values=-1)
+# optimize_graph_node_classifier('accuracy', features, nlabels, adj, cv)
+# qwe
 
-# optimize_graph_node_classifier('accuracy', features, labels, adj, cv)
 from scipy import sparse
 from uxils.random_ext import fix_seed
 fix_seed()
@@ -61,10 +69,10 @@ fix_seed()
 
 def func(features, labels, adj):
     n_classes = np.max(labels) + 1
-    conv_class = partial(dgl_layers.TAGConv, k=3)
+    conv_class = partial(dgl_layers.TAGConv, k=5)
     model = ConvolutionalNodeClassifier(
-        n_classes=n_classes, conv_class=conv_class, hidden_size=40, n_layers=3, lr=0.01,
-        in_normalization='bn', hidden_normalization=None, wd=0.01,
+        n_classes=n_classes, conv_class=conv_class, n_hiddens=[100, 50, 40], lr=0.01,
+        in_normalization='bn', hidden_normalization='ln', wd=0,
         optimizer='adamw', activation='tanh'
     )
     train_idx, val_idx = cv[0]
@@ -140,8 +148,6 @@ print(add_adj.shape, add_adj.dtype)
 print('NNZ diff', nadj.getnnz() - adj.getnnz())
 nlabels = np.pad(labels, (0, nadj.shape[0] - len(labels)), constant_values=-1)
 # nfeatures = np.random.uniform(-2, 2, size=(500, 100)).astype(np.float32)
-nfeatures = np.random.choice([-1.9], size=(500, 100)).astype(np.float32)
-# np.save('feature.npy', nfeatures)
 
 # score = func(np.vstack((features, nfeatures)), nlabels, nadj)
 

@@ -27,12 +27,11 @@ class ConvolutionalNodeClassifier:
     Accepts layers from both dgl or pytorch_geometric.
     """
 
-    def __init__(self, *, n_classes, conv_class, hidden_size, n_layers, in_dropout=None, out_dropout=None,
+    def __init__(self, *, n_classes, conv_class, n_hiddens, in_dropout=None, out_dropout=None,
                  in_normalization=None, hidden_normalization=None,
                  n_epochs=10, wd=0, lr=0.01, optimizer='adam', activation='tanh', device='cuda'):
         self.conv_class = conv_class
-        self.hidden_size = hidden_size
-        self.n_layers = n_layers
+        self.n_hiddens = n_hiddens
         self.device = torch.device(device)
         self.n_epochs = n_epochs
         self.n_classes = n_classes
@@ -50,7 +49,7 @@ class ConvolutionalNodeClassifier:
         input_size = data.x.shape[1]
         self.model = GraphConvolutionStack(
             input_size=input_size, n_classes=self.n_classes,
-            n_layers=self.n_layers, conv_class=self.conv_class, n_hidden=self.hidden_size,
+            conv_class=self.conv_class, n_hiddens=self.n_hiddens,
             in_dropout=self.in_dropout, out_dropout=self.out_dropout, activation=self.activation,
             in_normalization=self.in_normalization, hidden_normalization=self.hidden_normalization)
         self.model = self.model.to(self.device)
