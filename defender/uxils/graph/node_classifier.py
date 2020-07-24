@@ -6,7 +6,7 @@ from scipy import sparse
 # from torch_geometric.utils import from_scipy_sparse_matrix
 
 from uxils.torch_ext.graph_modules import GraphConvolutionStack
-from uxils.torch_ext.module_utils import init_optimizer
+from uxils.torch_ext.module_utils import init_optimizer, init_criterion
 
 
 class Graph:
@@ -28,7 +28,7 @@ class ConvolutionalNodeClassifier:
     """
 
     def __init__(self, *, n_classes, conv_class, n_hiddens, in_dropout=None, out_dropout=None,
-                 in_normalization=None, hidden_normalization=None,
+                 in_normalization=None, hidden_normalization=None, criterion='ce',
                  n_epochs=10, wd=0, lr=0.01, optimizer='adam', activation='tanh', device='cuda'):
         self.conv_class = conv_class
         self.n_hiddens = n_hiddens
@@ -44,6 +44,7 @@ class ConvolutionalNodeClassifier:
         self.in_normalization = in_normalization
         self.hidden_normalization = hidden_normalization
         self.model = None
+        self.criterion = criterion
 
     def init_model(self, data):
         input_size = data.x.shape[1]
@@ -54,7 +55,7 @@ class ConvolutionalNodeClassifier:
             in_normalization=self.in_normalization, hidden_normalization=self.hidden_normalization)
         self.model = self.model.to(self.device)
         self.optimizer = init_optimizer(self.optimizer_str)(self.model.parameters(), lr=self.lr, weight_decay=self.wd)
-        self.criterion = torch.nn.CrossEntropyLoss()
+        self.criterion = init_criterion(self.criterion)
 
     def fit(self, g: Graph, train_indices, n_epochs=None):
         data, g = g.pyg_data, g.dgl_graph
@@ -79,6 +80,8 @@ class ConvolutionalNodeClassifier:
 
     def predict(self, g: Graph, indices=None):
         data, g = g.pyg_data, g.dgl_graph
+
+        g = g.to(self.device)
 
         self.model.eval()
         with torch.no_grad():

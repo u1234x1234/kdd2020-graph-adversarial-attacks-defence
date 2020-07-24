@@ -1,89 +1,116 @@
 # %%
-import numpy as np
-
-nfeatures = np.random.choice([-1.99], size=(500, 100)).astype(np.float32)
-np.save('feature.npy', nfeatures)
-
-qwe
-
 import pickle
+import sys
+from collections import Counter, defaultdict
 from functools import partial
-import joblib
 
+import joblib
+import numpy as np
 from dgl.nn import pytorch as dgl_layers
+from scipy import sparse
 from scipy.special import softmax
+from sklearn import ensemble
+from sklearn.cluster import KMeans
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch_geometric import nn as pyg_layers
 
 from data_utils import get_validation_split
+from utils import load
 from uxils.automl.model_specific import optimize_graph_node_classifier
-from uxils.graph.feature_extraction import pooled_features
 from uxils.graph.node_classifier import (ConvolutionalNodeClassifier,
                                          create_graph)
-from uxils.profiling import Profiler
+from uxils.random_ext import fix_seed
 from uxils.timer import Timer
-from sklearn import ensemble
 
-
-def load(d):
-    if d:
-        with open('data/experimental_adj.pkl', 'rb') as in_file:
-            adj = pickle.load(in_file)
-        with open('data/experimental_features.pkl', 'rb') as in_file:
-            features = pickle.load(in_file)
-        with open('data/experimental_train.pkl', 'rb') as in_file:
-            labels = pickle.load(in_file)
-    else:
-        with open('data/kdd_cup_phase_two/adj_matrix_formal_stage.pkl', 'rb') as in_file:
-            adj = pickle.load(in_file)
-        features = np.load('data/kdd_cup_phase_two/feature_formal_stage.npy')
-        labels = np.load('data/kdd_cup_phase_two/train_labels_formal_stage.npy')
-
-    return adj, features, labels
-
-
+fix_seed()
 adj, features, labels = load(0)
-
-# X = pooled_features(features, adj)
-X = features
-y = labels
-X = X[:len(labels)]
-print(X.shape, len(y))
-
-
-# features = StandardScaler().fit_transform(features)
-
 cv = [get_validation_split(len(labels), test_size=0.01)]
+train_idx, val_idx = cv[0]
 
 # %%
-# nlabels = np.pad(labels, (0, adj.shape[0] - len(labels)), constant_values=-1)
+
+# aadj = adj.tocoo()
+# dd = defaultdict(list)
+# for f, t in zip(aadj.row, aadj.col):
+#     if f == 22 or t == 22:
+#         print(f, t)
+#     dd[f].append(t)
+
+
+nlabels = np.pad(labels, (0, adj.shape[0] - len(labels)), constant_values=0)
+# for v in val_idx:  # mask validation labels
+    # nlabels[v] = 0
+
+# # %%
+# print('classes', Counter(labels).most_common())
+
+# x_per_class = defaultdict(list)
+# for idx, l in enumerate(labels):
+#     x_per_class[l].append(idx)
+
+# X_cl = np.array([features[idx] for idx in x_per_class[6]])
+# km = KMeans(n_clusters=10)
+# km.fit(X_cl)
+# print(km.cluster_centers_.shape)
+
+# # %%
+# items = list(d.items())
+# np.random.shuffle(items)
+# idx = 0
+
+# counter = Counter()
+
+# nei_to_root = defaultdict(list)
+# for u, vs in items:
+#     u_label = nlabels[u]
+#     v_labels = [nlabels[idx] for idx in vs]
+#     nei_to_root[tuple(v_labels)].append(u_label)
+# print(f'unique nei {len(nei_to_root)}')
+
+# for u, vs in items:
+#     v_labels = [nlabels[idx] for idx in vs]
+#     u_label = nlabels[u]
+
+#     if len(v_labels) != 2:
+#         continue
+
+#     counter[tuple(v_labels)] += 1
+#     # print(u_label, v_labels)
+#     idx += 1
+#     # if idx == 30:
+#         # break
+
+# print(idx)
+# for x, cnt in counter.most_common(30):
+#     print(x, cnt)
+
+# # %%
+
+# s = nei_to_root[(6, 6)]
+# print(Counter(s).most_common())
+
+# %%
 # optimize_graph_node_classifier('accuracy', features, nlabels, adj, cv)
 # qwe
 
-from scipy import sparse
-from uxils.random_ext import fix_seed
-fix_seed()
-
-
 def func(features, labels, adj):
     n_classes = np.max(labels) + 1
-    conv_class = partial(dgl_layers.TAGConv, k=5)
+    # conv_class = partial(pyg_layers.ChebConv, K=7)
+    conv_class = partial(dgl_layers.SGConv, k=4)
     model = ConvolutionalNodeClassifier(
-        n_classes=n_classes, conv_class=conv_class, n_hiddens=[100, 50, 40], lr=0.01,
+        n_classes=n_classes, conv_class=conv_class, n_hiddens=[140, 120, 100], lr=0.01,
         in_normalization='bn', hidden_normalization='ln', wd=0,
-        optimizer='adamw', activation='tanh'
+        optimizer='adamw', activation='tanh', criterion='ce'
     )
-    train_idx, val_idx = cv[0]
     g = create_graph(features, labels, adj)
 
-    for i in range(10):
+    for i in range(30):
         model.fit(g, train_idx, n_epochs=20)
-
         r = model.predict(g, val_idx)
         acc = (r.argmax(axis=1) == labels[val_idx]).mean()
-        print(acc)
+        print(i, acc)
 
     joblib.dump(model, 'model.pkl')
 
@@ -92,7 +119,6 @@ def func(features, labels, adj):
 
 def create_adj(adj, test_idxs):
     adj = adj.copy()
-
     add_adj = sparse.dok_matrix((500, 659574+500), dtype=np.int64)
 
     ####################################
@@ -102,22 +128,27 @@ def create_adj(adj, test_idxs):
         r = adj[i].getnnz()
         idxs.append((i, r))
 
-    idxs = list(sorted(idxs, key=lambda x: x[1]))[:10000]
+    idxs = list(sorted(idxs, key=lambda x: x[1]))[:50000//5]
+    # idxs = list(filter(lambda x: nlabels[x[0]] == 6, idxs))
+    # print(len(idxs))
 
-    for i, (idx, r) in enumerate(idxs):
+    for i, (idx, r) in enumerate(idxs[:-500]):
         for j in range(5):
             row = (i+j) % 500
             add_adj[row, idx] = 1
 
+    for i in range(500):
+        add_adj[i, i] = 1
+
     add_adj = add_adj.tocsr()
-    print(add_adj.getnnz(axis=1))
 
     ####################################
 
-    assert add_adj.getnnz(axis=1).max() <= 100
-    assert (add_adj[:, 659574:].transpose(copy=True).todense() == add_adj[:, 659574:].todense()).all()
+    # assert add_adj.getnnz(axis=1).max() <= 100
+    # assert (add_adj[:, 659574:].transpose(copy=True).todense() == add_adj[:, 659574:].todense()).all()
 
-    nadj = adj.copy().todok()
+    nadj = adj.todok()
+    return
     nadj.resize((659574+500, 659574+500))
     cx = add_adj.tocoo()
 
@@ -127,19 +158,35 @@ def create_adj(adj, test_idxs):
 
     nadj = nadj.tocsr()
     nadj = nadj.astype(np.int64)
+
+    # print(nadj[29].nonzero(), adj[29].nonzero())
     return nadj, add_adj
 
 
-nlabels = np.pad(labels, (0, adj.shape[0] - len(labels)), constant_values=-1)
-score = func(features, nlabels, adj)
-print(score)
-qwe
+def evaluate_attacker(features, adj):
+    model = joblib.load('model.pkl')
+    g = create_graph(features, np.zeros(len(features)), adj)
+    predictions = model.predict(g, val_idx).argmax(axis=1)
+    score = (predictions == labels[val_idx]).mean()
+    return score
 
-val_idx = cv[0][1]
+
+# nlabels = np.pad(labels, (0, adj.shape[0] - len(labels)), constant_values=-1)
+# score = func(features, nlabels, adj)
+# print(score)
+# qwe
+
+# nfeatures = km.cluster_centers_[:2]
+# nfeatures = np.array(X_cl[:2])
+# nfeatures = np.repeat(nfeatures, 250, axis=0)
+# assert nfeatures.shape == (500, 100)
+
 # test_idx = list(range(len(labels), adj.shape[0]))
-# print('test', test_idx[:3], len(test_idx))
 
-nadj, add_adj = create_adj(adj, val_idx)
+with Timer():
+    nadj, add_adj = create_adj(adj, val_idx)
+
+qwe
 print(add_adj.shape, add_adj.dtype)
 
 # with open('adj.pkl', 'wb') as out_file:
@@ -147,75 +194,9 @@ print(add_adj.shape, add_adj.dtype)
 
 print('NNZ diff', nadj.getnnz() - adj.getnnz())
 nlabels = np.pad(labels, (0, nadj.shape[0] - len(labels)), constant_values=-1)
-# nfeatures = np.random.uniform(-2, 2, size=(500, 100)).astype(np.float32)
 
-# score = func(np.vstack((features, nfeatures)), nlabels, nadj)
-
-
-qwe
-
-
-# %%
-# print(nfeatures.shape, len(nlabels), nadj.shape)
-import sys
-sys.path.append('/home/u1234x1234/libs/pygmo2/build/')
-
-import pygmo as pg
-
-
-def obj(w):
-    w = w.reshape((500, 100))
-    nfeatures = np.vstack((features, w))
-    score = func(nfeatures, nlabels, nadj)
-    return -score
-
-
-class problem:
-    def __init__(self):
-        self.dim = 100*500
-
-    def fitness(self, x):
-        score = obj(x)
-        print(score)
-        return [score]
-
-    def get_bounds(self):
-        return ([-2]*self.dim, [2] * self.dim)
-
-
-prob = pg.problem(problem())
-print(prob)
-
-algo = pg.algorithm(pg.sga(gen=10))
-algo.set_verbosity(5)
-print(algo)
-
-pop = pg.population(prob, 20)
-pop = algo.evolve(pop)
-print(pop.champion_f) 
-qwe
-
-
-w = np.random.normal(0, 1, size=(500, 100)).flatten()
-alpha = 0.5
-import noisyopt
-
-noisyopt.minimizeSPSA(obj, w, paired=False)
-
-qwe
-
-for it in range(100):
-
-    delta = np.random.uniform(-0.2, 0.2, size=w.shape)
-    w[w > 2] = 2
-    w[w < -2] = -2
-
-    score1 = func(np.vstack((features, w+delta)), nlabels, nadj)
-    score2 = func(np.vstack((features, w-delta)), nlabels, nadj)
-
-    grad = (score1 - score2) / (2. * delta)
-    w = w - alpha * grad
-
-    print(score1, score2)
-
-# Train on FUll
+# for _ in range(10):
+    # nfeatures = np.random.uniform(-200, 200, size=(500, 100)).astype(np.float32)
+nfeatures = np.random.choice([-1.9], size=(500, 100)).astype(np.float32)
+nfeatures = np.vstack((features, nfeatures))
+print(evaluate_attacker(nfeatures, nadj))
