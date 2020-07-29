@@ -3,8 +3,8 @@ import pickle
 import numpy as np
 
 
-def load(d):
-    if d:
+def load(first_stage=False):
+    if first_stage:
         with open('data/experimental_adj.pkl', 'rb') as in_file:
             adj = pickle.load(in_file)
         with open('data/experimental_features.pkl', 'rb') as in_file:
