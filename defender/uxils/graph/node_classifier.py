@@ -2,8 +2,8 @@ import numpy as np
 import torch
 from dgl import DGLGraph
 from scipy import sparse
-# from torch_geometric.data import Data
-# from torch_geometric.utils import from_scipy_sparse_matrix
+from torch_geometric.data import Data
+from torch_geometric.utils import from_scipy_sparse_matrix
 
 from uxils.torch_ext.graph_modules import GraphConvolutionStack
 from uxils.torch_ext.module_utils import init_optimizer, init_criterion

@@ -36,9 +36,9 @@ def train_defender(features, labels, adj):
     return acc
 
 
-def create_attacker(adj, test_idxs):
+def create_attacker(adj, test_idxs, n_nodes=659574, k=500):
     adj = adj.copy()
-    add_adj = sparse.dok_matrix((500, 659574+500), dtype=np.int64)
+    add_adj = sparse.dok_matrix((k, n_nodes+k), dtype=np.int64)
 
     ####################################
 
@@ -49,12 +49,12 @@ def create_attacker(adj, test_idxs):
 
     idxs = list(sorted(idxs, key=lambda x: x[1]))[:50000 // 5]
 
-    for i, (idx, r) in enumerate(idxs[:-500]):
+    for i, (idx, r) in enumerate(idxs[:-k]):
         for j in range(5):
-            row = (i+j) % 500
+            row = (i+j) % k
             add_adj[row, idx] = 1
 
-    for i in range(500):
+    for i in range(k):
         add_adj[i, i] = 1
 
     add_adj = add_adj.tocsr()
@@ -62,19 +62,21 @@ def create_attacker(adj, test_idxs):
     ####################################
 
     assert add_adj.getnnz(axis=1).max() <= 100
-    assert (add_adj[:, 659574:].transpose(copy=True).todense() == add_adj[:, 659574:].todense()).all()
+    assert (add_adj[:, n_nodes:].transpose(copy=True).todense() == add_adj[:, n_nodes:].todense()).all()
 
     return add_adj
 
 
 if __name__ == '__main__':
-    # Defender
-    nlabels = np.pad(labels, (0, adj.shape[0] - len(labels)), constant_values=-1)
-    train_defender(features, nlabels, adj)
-
     # Attacker
     add_adj = create_attacker(adj, np.arange(len(labels), adj.shape[0]))
     joblib.dump(add_adj, 'adj.pkl')
 
     nfeatures = np.random.choice([-1.9], size=(500, 100)).astype(np.float32)
     np.save('features.npy', nfeatures)
+    print("Attacker succesfully generated to features.npy, adj.pkl files")
+
+    # Defender
+    nlabels = np.pad(labels, (0, adj.shape[0] - len(labels)), constant_values=-1)
+    train_defender(features, nlabels, adj)
+    print("Defender succesfully generated: model.pkl")

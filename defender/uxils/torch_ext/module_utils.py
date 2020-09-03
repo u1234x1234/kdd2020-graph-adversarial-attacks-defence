@@ -30,6 +30,7 @@ NORMALIZATIONS = {
     'batch': nn.BatchNorm1d,
     'bn': nn.BatchNorm1d,
     'layer': nn.LayerNorm,
+    'ln': nn.LayerNorm,
 }
 
 
