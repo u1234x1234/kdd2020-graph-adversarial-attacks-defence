@@ -55,7 +55,7 @@ Attacker nodes with fixed features attached to the nodes (of the original graph)
 # Acknowledgements
 
 * DGL library https://github.com/dmlc/dgl - great library
-* PyTorch geometric https://github.com/rusty1s/pytorch_geometric - also great library by was not used in the final submission
+* PyTorch geometric https://github.com/rusty1s/pytorch_geometric - also great library but was not used in the final submission
 
 # Test defender submission
 
